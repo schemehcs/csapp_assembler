@@ -78,185 +78,179 @@ enum Reg {
 
 struct Asm<'a> {
     cursor: Peekable<CharIndices<'a>>,
+    ln: usize,
 }
 
 impl<'a> Asm<'a> {
     pub fn new(input: &'a str) -> Self {
         Asm {
             cursor: input.char_indices().peekable(),
+            ln: 1,
         }
     }
 
     pub fn parse(&mut self) -> anyhow::Result<Vec<Stmt>> {
         let mut stmts = Vec::new();
-        while let Some((_, c)) = self.opt_space() {
+        while let Some((i, c)) = self.opt_space() {
             match c {
-                '#' => {
-                    self.next();
-                    self.eat_comment();
-                }
-                '\n' => {
-                    self.next();
-                }
-                _ => {
-                    match self.expect_opword()? {
-                        OpWord::Label(lab) => {
-                            stmts.push(Stmt::Label(lab));
-                        }
-                        OpWord::Keyword(kw) => match kw.as_str() {
-                            ".pos" => {
-                                self.expect_space()?;
-                                stmts.push(Stmt::DotPos(self.expect_u64()?));
-                            }
-                            ".quad" => {
-                                self.expect_space()?;
-                                stmts.push(Stmt::DotQuad(self.expect_u64()?));
-                            }
-                            ".align" => {
-                                self.expect_space()?;
-                                stmts.push(Stmt::DotAlign(self.expect_u64()?));
-                            }
-                            ".entry" => {
-                                self.expect_space()?;
-                                stmts.push(Stmt::DotEntry(self.expect_location()?));
-                            }
-                            _ => bail!("invalid key word found {}", kw),
-                        },
-                        OpWord::Other(op) => match op.as_str() {
-                            "halt" => stmts.push(Stmt::Halt),
-                            "nop" => stmts.push(Stmt::Nop),
-                            "rrmovq" => {
-                                self.expect_space()?;
-                                let (ra, rb) = self.expect_rr()?;
-                                stmts.push(Stmt::Rrmovq(ra, rb));
-                            }
-                            "irmovq" => {
-                                self.expect_space()?;
-                                let loc = self.expect_location()?;
-                                self.opt_space();
-                                self.expect_char(',')?;
-                                self.opt_space();
-                                let ra = self.expect_reg()?;
-                                stmts.push(Stmt::Irmovq(loc, ra));
-                            }
-                            "rmmovq" => {
-                                self.expect_space()?;
-                                let ra = self.expect_reg()?;
-                                self.opt_space();
-                                self.expect_char(',')?;
-                                self.opt_space();
-                                let mem = self.expect_mem()?;
-                                stmts.push(Stmt::Rmmovq(ra, mem));
-                            }
-                            "mrmovq" => {
-                                self.expect_space()?;
-                                let mem = self.expect_mem()?;
-                                self.opt_space();
-                                self.expect_char(',')?;
-                                self.opt_space();
-                                let ra = self.expect_reg()?;
-                                stmts.push(Stmt::Mrmovq(mem, ra));
-                            }
-                            "addq" => {
-                                self.expect_space()?;
-                                let (ra, rb) = self.expect_rr()?;
-                                stmts.push(Stmt::Addq(ra, rb));
-                            }
-                            "subq" => {
-                                self.expect_space()?;
-                                let (ra, rb) = self.expect_rr()?;
-                                stmts.push(Stmt::Subq(ra, rb));
-                            }
-                            "andq" => {
-                                self.expect_space()?;
-                                let (ra, rb) = self.expect_rr()?;
-                                stmts.push(Stmt::Andq(ra, rb));
-                            }
-                            "xorq" => {
-                                self.expect_space()?;
-                                let (ra, rb) = self.expect_rr()?;
-                                stmts.push(Stmt::Xorq(ra, rb));
-                            }
-                            "jmp" => {
-                                self.expect_space()?;
-                                stmts.push(Stmt::Jmp(self.expect_location()?));
-                            }
-                            "jle" => {
-                                self.expect_space()?;
-                                stmts.push(Stmt::Jle(self.expect_location()?));
-                            }
-                            "jl" => {
-                                self.expect_space()?;
-                                stmts.push(Stmt::Jl(self.expect_location()?));
-                            }
-                            "je" => {
-                                self.expect_space()?;
-                                stmts.push(Stmt::Je(self.expect_location()?));
-                            }
-                            "jne" => {
-                                self.expect_space()?;
-                                stmts.push(Stmt::Jne(self.expect_location()?));
-                            }
-                            "jge" => {
-                                self.expect_space()?;
-                                stmts.push(Stmt::Jge(self.expect_location()?));
-                            }
-                            "jg" => {
-                                self.expect_space()?;
-                                stmts.push(Stmt::Jg(self.expect_location()?));
-                            }
-                            "cmovle" => {
-                                self.expect_space()?;
-                                let (ra, rb) = self.expect_rr()?;
-                                stmts.push(Stmt::Cmovle(ra, rb));
-                            }
-                            "cmovl" => {
-                                self.expect_space()?;
-                                let (ra, rb) = self.expect_rr()?;
-                                stmts.push(Stmt::Cmovl(ra, rb));
-                            }
-                            "cmove" => {
-                                self.expect_space()?;
-                                let (ra, rb) = self.expect_rr()?;
-                                stmts.push(Stmt::Cmove(ra, rb));
-                            }
-                            "cmovne" => {
-                                self.expect_space()?;
-                                let (ra, rb) = self.expect_rr()?;
-                                stmts.push(Stmt::Cmovne(ra, rb));
-                            }
-                            "cmovge" => {
-                                self.expect_space()?;
-                                let (ra, rb) = self.expect_rr()?;
-                                stmts.push(Stmt::Cmovge(ra, rb));
-                            }
-                            "cmovg" => {
-                                self.expect_space()?;
-                                let (ra, rb) = self.expect_rr()?;
-                                stmts.push(Stmt::Cmovg(ra, rb));
-                            }
-                            "call" => {
-                                self.expect_space()?;
-                                let loc = self.expect_location()?;
-                                stmts.push(Stmt::Call(loc));
-                            }
-                            "ret" => {
-                                stmts.push(Stmt::Ret);
-                            }
-                            "pushq" => {
-                                self.expect_space()?;
-                                stmts.push(Stmt::Pushq(self.expect_reg()?));
-                            }
-                            "popq" => {
-                                self.expect_space()?;
-                                stmts.push(Stmt::Popq(self.expect_reg()?));
-                            }
-                            _ => bail!("invalid opword found {}", op.as_str()),
-                        },
+                '#' | '\n' => {}
+                _ => match self.expect_opword()? {
+                    OpWord::Label(lab) => {
+                        stmts.push(Stmt::Label(lab));
                     }
-                    self.eat_ln()?;
-                }
+                    OpWord::Keyword(kw) => match kw.as_str() {
+                        ".pos" => {
+                            self.expect_space()?;
+                            stmts.push(Stmt::DotPos(self.expect_u64()?));
+                        }
+                        ".quad" => {
+                            self.expect_space()?;
+                            stmts.push(Stmt::DotQuad(self.expect_u64()?));
+                        }
+                        ".align" => {
+                            self.expect_space()?;
+                            stmts.push(Stmt::DotAlign(self.expect_u64()?));
+                        }
+                        ".entry" => {
+                            self.expect_space()?;
+                            stmts.push(Stmt::DotEntry(self.expect_location()?));
+                        }
+                        _ => bail!("invalid key word {},{}:{}", self.ln, i, kw),
+                    },
+                    OpWord::Other(op) => match op.as_str() {
+                        "halt" => stmts.push(Stmt::Halt),
+                        "nop" => stmts.push(Stmt::Nop),
+                        "rrmovq" => {
+                            self.expect_space()?;
+                            let (ra, rb) = self.expect_rr()?;
+                            stmts.push(Stmt::Rrmovq(ra, rb));
+                        }
+                        "irmovq" => {
+                            self.expect_space()?;
+                            let loc = self.expect_location()?;
+                            self.opt_space();
+                            self.expect_char(',')?;
+                            self.opt_space();
+                            let ra = self.expect_reg()?;
+                            stmts.push(Stmt::Irmovq(loc, ra));
+                        }
+                        "rmmovq" => {
+                            self.expect_space()?;
+                            let ra = self.expect_reg()?;
+                            self.opt_space();
+                            self.expect_char(',')?;
+                            self.opt_space();
+                            let mem = self.expect_mem()?;
+                            stmts.push(Stmt::Rmmovq(ra, mem));
+                        }
+                        "mrmovq" => {
+                            self.expect_space()?;
+                            let mem = self.expect_mem()?;
+                            self.opt_space();
+                            self.expect_char(',')?;
+                            self.opt_space();
+                            let ra = self.expect_reg()?;
+                            stmts.push(Stmt::Mrmovq(mem, ra));
+                        }
+                        "addq" => {
+                            self.expect_space()?;
+                            let (ra, rb) = self.expect_rr()?;
+                            stmts.push(Stmt::Addq(ra, rb));
+                        }
+                        "subq" => {
+                            self.expect_space()?;
+                            let (ra, rb) = self.expect_rr()?;
+                            stmts.push(Stmt::Subq(ra, rb));
+                        }
+                        "andq" => {
+                            self.expect_space()?;
+                            let (ra, rb) = self.expect_rr()?;
+                            stmts.push(Stmt::Andq(ra, rb));
+                        }
+                        "xorq" => {
+                            self.expect_space()?;
+                            let (ra, rb) = self.expect_rr()?;
+                            stmts.push(Stmt::Xorq(ra, rb));
+                        }
+                        "jmp" => {
+                            self.expect_space()?;
+                            stmts.push(Stmt::Jmp(self.expect_location()?));
+                        }
+                        "jle" => {
+                            self.expect_space()?;
+                            stmts.push(Stmt::Jle(self.expect_location()?));
+                        }
+                        "jl" => {
+                            self.expect_space()?;
+                            stmts.push(Stmt::Jl(self.expect_location()?));
+                        }
+                        "je" => {
+                            self.expect_space()?;
+                            stmts.push(Stmt::Je(self.expect_location()?));
+                        }
+                        "jne" => {
+                            self.expect_space()?;
+                            stmts.push(Stmt::Jne(self.expect_location()?));
+                        }
+                        "jge" => {
+                            self.expect_space()?;
+                            stmts.push(Stmt::Jge(self.expect_location()?));
+                        }
+                        "jg" => {
+                            self.expect_space()?;
+                            stmts.push(Stmt::Jg(self.expect_location()?));
+                        }
+                        "cmovle" => {
+                            self.expect_space()?;
+                            let (ra, rb) = self.expect_rr()?;
+                            stmts.push(Stmt::Cmovle(ra, rb));
+                        }
+                        "cmovl" => {
+                            self.expect_space()?;
+                            let (ra, rb) = self.expect_rr()?;
+                            stmts.push(Stmt::Cmovl(ra, rb));
+                        }
+                        "cmove" => {
+                            self.expect_space()?;
+                            let (ra, rb) = self.expect_rr()?;
+                            stmts.push(Stmt::Cmove(ra, rb));
+                        }
+                        "cmovne" => {
+                            self.expect_space()?;
+                            let (ra, rb) = self.expect_rr()?;
+                            stmts.push(Stmt::Cmovne(ra, rb));
+                        }
+                        "cmovge" => {
+                            self.expect_space()?;
+                            let (ra, rb) = self.expect_rr()?;
+                            stmts.push(Stmt::Cmovge(ra, rb));
+                        }
+                        "cmovg" => {
+                            self.expect_space()?;
+                            let (ra, rb) = self.expect_rr()?;
+                            stmts.push(Stmt::Cmovg(ra, rb));
+                        }
+                        "call" => {
+                            self.expect_space()?;
+                            let loc = self.expect_location()?;
+                            stmts.push(Stmt::Call(loc));
+                        }
+                        "ret" => {
+                            stmts.push(Stmt::Ret);
+                        }
+                        "pushq" => {
+                            self.expect_space()?;
+                            stmts.push(Stmt::Pushq(self.expect_reg()?));
+                        }
+                        "popq" => {
+                            self.expect_space()?;
+                            stmts.push(Stmt::Popq(self.expect_reg()?));
+                        }
+                        _ => bail!("invalid opword found {},{}:{}", self.ln, i, op.as_str()),
+                    },
+                },
             }
+            self.eat_ln()?;
         }
         Ok(stmts)
     }
@@ -291,10 +285,10 @@ impl<'a> Asm<'a> {
                     self.expect_char(')')?;
                     Ok(MemAccess { offset, reg })
                 }
-                _ => bail!("invalid mem access pattern found {}:{}", i, c),
+                _ => bail!("invalid mem access pattern {},{}:{}", self.ln, i, c),
             }
         } else {
-            bail!("expect mem access pattern but EOI reached");
+            bail!("expect mem access pattern but actual EOI {}:", self.ln);
         }
     }
 
@@ -303,10 +297,10 @@ impl<'a> Asm<'a> {
             if ec == c {
                 Ok(())
             } else {
-                bail!("expect {} but found {}: {}", ec, i, c);
+                bail!("expect {} but actual {},{}:{}", ec, self.ln, i, c);
             }
         } else {
-            bail!("expect {} but EOI reached", ec);
+            bail!("expect {} but actual EOI {}:", ec, self.ln);
         }
     }
 
@@ -328,12 +322,17 @@ impl<'a> Asm<'a> {
                         match nc {
                             'x' => Reg::Rdx,
                             'i' => Reg::Rdi,
-                            _ => bail!("invalid register identifier found {}:{}", ni, nc),
+                            _ => bail!(
+                                "invalid register identifier found {},{}:{}",
+                                self.ln,
+                                ni,
+                                nc
+                            ),
                         }
                     } else {
                         bail!(
-                            "expect register identifier but EOI reached after {}:{}",
-                            i,
+                            "expect register identifier but actual EOI {}:{}(EOI)",
+                            self.ln,
                             c
                         );
                     }
@@ -343,12 +342,12 @@ impl<'a> Asm<'a> {
                         match nc {
                             'x' => Reg::Rbx,
                             'p' => Reg::Rbp,
-                            _ => bail!("invalid register identifier found {}:{}", ni, nc),
+                            _ => bail!("invalid register identifier {},{}:{}", self.ln, ni, nc),
                         }
                     } else {
                         bail!(
-                            "expect register identifier but EOI reached after {}:{}",
-                            i,
+                            "expect register identifier but EOI reached after {}:{}(EOI)",
+                            self.ln,
                             c
                         );
                     }
@@ -358,12 +357,12 @@ impl<'a> Asm<'a> {
                         match nc {
                             'i' => Reg::Rsi,
                             'p' => Reg::Rsp,
-                            _ => bail!("invalid register identifier found {}:{}", ni, nc),
+                            _ => bail!("invalid register identifier {},{}:{}", self.ln, ni, nc),
                         }
                     } else {
                         bail!(
-                            "expect register identifier but EOI reached after {}:{}",
-                            i,
+                            "expect register identifier but actual EOI {}:{}(EOI)",
+                            self.ln,
                             c
                         );
                     }
@@ -378,17 +377,17 @@ impl<'a> Asm<'a> {
                             '2' => Reg::R12,
                             '3' => Reg::R13,
                             '4' => Reg::R14,
-                            _ => bail!("expect R1x register but {}:{} found", ni, nc),
+                            _ => bail!("expect R1x register but actual {},{}:{}", self.ln, ni, nc),
                         }
                     } else {
-                        bail!("expect R1x register but EOI reached");
+                        bail!("expect R1x register but actual EOI {}:", self.ln);
                     }
                 }
-                _ => bail!("invalid register identifier {}:{}", i, c),
+                _ => bail!("invalid register identifier {},{}:{}", self.ln, i, c),
             };
             Ok(reg)
         } else {
-            bail!("expect register identifier but EOI reached");
+            bail!("expect register identifier but actual EOI {}:", self.ln);
         }
     }
 
@@ -438,10 +437,10 @@ impl<'a> Asm<'a> {
                     Ok(self.expect_u64()? as i64)
                 }
                 '0'..='9' => Ok(self.expect_u64()? as i64),
-                _ => bail!("invalid i64 number reached {}:{}", i, c),
+                _ => bail!("invalid i64 number {},{}:{}", self.ln, i, c),
             }
         } else {
-            bail!("expected i64 number but EOI reached");
+            bail!("expected i64 but actual EOI {}:", self.ln);
         }
     }
 
@@ -456,7 +455,12 @@ impl<'a> Asm<'a> {
                 '0'..='9' => {
                     self.next();
                     if op_str.is_empty() {
-                        bail!("opword should not start with a number {}:{}", i, c);
+                        bail!(
+                            "invalid opword: start with number is not allowed {},{}:{}",
+                            self.ln,
+                            i,
+                            c
+                        );
                     } else {
                         op_str.push(c);
                     }
@@ -464,7 +468,12 @@ impl<'a> Asm<'a> {
                 '.' => {
                     self.next();
                     if !op_str.is_empty() {
-                        bail!(". can only start in the starting of the keyword");
+                        bail!(
+                            ".(Dot) not allowed in the mid of a operator {},{}:{}",
+                            self.ln,
+                            i,
+                            c
+                        );
                     } else {
                         op_str.push(c);
                     }
@@ -472,9 +481,14 @@ impl<'a> Asm<'a> {
                 ':' => {
                     self.next();
                     if op_str.is_empty() {
-                        bail!("empty label is not allowed {}:{}", i, c);
+                        bail!("empty label is not allowed {},{}:{}", self.ln, i, c);
                     } else if op_str.starts_with('.') {
-                        bail!("consider remove the leading . for the label {}", op_str);
+                        bail!(
+                            "consider remove the leading . for the label {},{}:{}",
+                            self.ln,
+                            i,
+                            op_str
+                        );
                     }
                     return Ok(OpWord::Label(op_str));
                 }
@@ -482,7 +496,7 @@ impl<'a> Asm<'a> {
             }
         }
         if op_str.is_empty() {
-            bail!("no valid op word found");
+            bail!("missing opword {}:", self.ln);
         } else if op_str.starts_with('.') {
             Ok(OpWord::Keyword(op_str))
         } else {
@@ -491,7 +505,7 @@ impl<'a> Asm<'a> {
     }
 
     pub fn expect_location(&mut self) -> anyhow::Result<Location> {
-        if let Some((_i, c)) = self.peek() {
+        if let Some((i, c)) = self.peek() {
             if c == '$' {
                 self.next();
                 return Ok(Location::Abs(self.expect_u64()?));
@@ -505,13 +519,13 @@ impl<'a> Asm<'a> {
                     self.next();
                 }
                 if loc_str.is_empty() {
-                    bail!("expect loc but no valid found");
+                    bail!("missing location {},{}:{}", self.ln, i, c);
                 } else {
                     return Ok(Location::Label(loc_str));
                 }
             }
         }
-        bail!("expect loc but EOI reached");
+        bail!("expect location but actual EOI {}:", self.ln);
     }
 
     pub fn opt_while<F: Fn(char) -> bool>(&mut self, f: F) -> Option<(usize, char)> {
@@ -535,16 +549,22 @@ impl<'a> Asm<'a> {
                 }
                 '\n' => {
                     self.next();
+                    self.nx_ln();
                     return Ok(());
                 }
-                _ => bail!("invalid rest of the line {}:{}", i, c),
+                _ => bail!("invalid rest of the line {},{}:{}", self.ln, i, c),
             }
         }
         Ok(())
     }
 
+    fn nx_ln(&mut self) {
+        self.ln += 1;
+    }
+
     fn eat_comment(&mut self) {
         if self.opt_while(|c| c != '\n').is_some() {
+            self.nx_ln();
             self.next();
         }
     }
@@ -552,7 +572,7 @@ impl<'a> Asm<'a> {
     fn expect_space(&mut self) -> anyhow::Result<Option<(usize, char)>> {
         if let Some((i, c)) = self.peek() {
             if c != ' ' {
-                bail!("expect at least one space but found {}:{}", i, c);
+                bail!("expect space but actual {},{}:{}", self.ln, i, c);
             }
             self.next();
         }
@@ -617,7 +637,7 @@ impl Segment {
     }
 
     fn pos(&self) -> u64 {
-        self.start + self.len() as u64
+        self.start + self.len()
     }
 
     fn len(&self) -> u64 {
@@ -643,8 +663,8 @@ impl Segment {
 
     fn overwrite(&mut self, pos: u64, le_bytes: &[u8]) {
         let offset = pos - self.start;
-        for i in 0..le_bytes.len() {
-            self.binary[offset as usize + i] = le_bytes[i];
+        for (i, b) in le_bytes.iter().enumerate() {
+            self.binary[offset as usize + i] = *b;
         }
     }
 }
