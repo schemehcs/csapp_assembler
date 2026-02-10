@@ -4,121 +4,40 @@ use pretty_hex::pretty_hex;
 use std::{
     collections::HashMap, fmt::Display, fs, iter::Peekable, path::PathBuf, str::CharIndices,
 };
+use y86_inst::{Inst, Location, MemAccess, Reg};
 
-#[derive(Debug)]
 enum Stmt {
-    DotEntry(Location),
-    DotPos(u64),
-    DotAlign(u64),
-    DotQuad(u64),
-    Label(String),
-    Halt,
-    Nop,
-    Rrmovq(Reg, Reg),
-    Irmovq(Location, Reg),
-    Rmmovq(Reg, MemAccess),
-    Mrmovq(MemAccess, Reg),
-    Addq(Reg, Reg),
-    Subq(Reg, Reg),
-    Andq(Reg, Reg),
-    Xorq(Reg, Reg),
-    Jmp(Location),
-    Jle(Location),
-    Jl(Location),
-    Je(Location),
-    Jne(Location),
-    Jge(Location),
-    Jg(Location),
-    Cmovle(Reg, Reg),
-    Cmovl(Reg, Reg),
-    Cmove(Reg, Reg),
-    Cmovne(Reg, Reg),
-    Cmovge(Reg, Reg),
-    Cmovg(Reg, Reg),
-    Call(Location),
-    Ret,
-    Pushq(Reg),
-    Popq(Reg),
+    Expr(Expr),
+    Inst(Inst),
 }
 
 impl Display for Stmt {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         use Stmt::*;
         match self {
-            DotEntry(loc) => write!(f, ".entry {}", loc),
-            DotPos(pos) => write!(f, ".pos {:x}", pos),
-            DotAlign(align) => write!(f, ".align 0x{:x}", align),
-            DotQuad(quad) => write!(f, ".quad 0x{:x}", quad),
+            Expr(expr) => expr.fmt(f),
+            Inst(inst) => inst.fmt(f),
+        }
+    }
+}
+
+enum Expr {
+    Entry(Location),
+    Pos(u64),
+    Align(u64),
+    Quad(u64),
+    Label(String),
+}
+
+impl Display for Expr {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        use Expr::*;
+        match self {
+            Entry(loc) => write!(f, ".entry {}", loc),
+            Pos(pos) => write!(f, ".pos {:x}", pos),
+            Align(align) => write!(f, ".align 0x{:x}", align),
+            Quad(quad) => write!(f, ".quad 0x{:x}", quad),
             Label(lab) => write!(f, "{}", lab),
-            Halt => write!(f, "halt"),
-            Nop => write!(f, "nop"),
-            Rrmovq(ra, rb) => write!(f, "rrmovq {}, {}", ra, rb),
-            Irmovq(loc, r) => write!(f, "irmoveq {}, {}", loc, r),
-            Rmmovq(r, ma) => write!(f, "rmmovq {}, {}", r, ma),
-            Mrmovq(ma, r) => write!(f, "mrmovq {}, {}", ma, r),
-            Addq(ra, rb) => write!(f, "addq {}, {}", ra, rb),
-            Subq(ra, rb) => write!(f, "subq {}, {}", ra, rb),
-            Andq(ra, rb) => write!(f, "andq {}, {}", ra, rb),
-            Xorq(ra, rb) => write!(f, "xorq {}, {}", ra, rb),
-            Jmp(loc) => write!(f, "jmp {}", loc),
-            Jle(loc) => write!(f, "jle {}", loc),
-            Jl(loc) => write!(f, "jl {}", loc),
-            Je(loc) => write!(f, "je {}", loc),
-            Jne(loc) => write!(f, "jne {}", loc),
-            Jge(loc) => write!(f, "jge {}", loc),
-            Jg(loc) => write!(f, "jg {}", loc),
-            Cmovle(ra, rb) => write!(f, "cmovle {}, {}", ra, rb),
-            Cmovl(ra, rb) => write!(f, "cmovl {}, {}", ra, rb),
-            Cmove(ra, rb) => write!(f, "cmove {}, {}", ra, rb),
-            Cmovne(ra, rb) => write!(f, "cmovne {}, {}", ra, rb),
-            Cmovge(ra, rb) => write!(f, "cmovge {}, {}", ra, rb),
-            Cmovg(ra, rb) => write!(f, "cmovg {}, {}", ra, rb),
-            Call(loc) => write!(f, "call {}", loc),
-            Ret => write!(f, "ret"),
-            Pushq(r) => write!(f, "pushq {}", r),
-            Popq(r) => write!(f, "popq {}", r),
-        }
-    }
-}
-
-impl Display for Location {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Location::Abs(abs) => write!(f, "0x{:x}", abs),
-            Location::Label(lab) => write!(f, "{}", lab),
-        }
-    }
-}
-
-impl Display for Reg {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        use Reg::*;
-        match self {
-            Rax => write!(f, "%rax"),
-            Rcx => write!(f, "%rcx"),
-            Rdx => write!(f, "%rdx"),
-            Rbx => write!(f, "%rbx"),
-            Rsp => write!(f, "%rsp"),
-            Rbp => write!(f, "%rbp"),
-            Rsi => write!(f, "%rsi"),
-            Rdi => write!(f, "%rdi"),
-            R8 => write!(f, "%r8"),
-            R9 => write!(f, "%r9"),
-            R10 => write!(f, "%r10"),
-            R11 => write!(f, "%r11"),
-            R12 => write!(f, "%r12"),
-            R13 => write!(f, "%r13"),
-            R14 => write!(f, "%r14"),
-        }
-    }
-}
-
-impl Display for MemAccess {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        if self.offset == 0 {
-            write!(f, "({})", self.reg)
-        } else {
-            write!(f, "0x{:x}({})", self.offset, self.reg)
         }
     }
 }
@@ -127,37 +46,6 @@ enum OpWord {
     Keyword(String),
     Label(String),
     Other(String),
-}
-
-#[derive(Debug)]
-enum Location {
-    Label(String),
-    Abs(u64),
-}
-
-#[derive(Debug)]
-struct MemAccess {
-    offset: i64,
-    reg: Reg,
-}
-
-#[derive(Debug)]
-enum Reg {
-    Rax,
-    Rcx,
-    Rdx,
-    Rbx,
-    Rsp,
-    Rbp,
-    Rsi,
-    Rdi,
-    R8,
-    R9,
-    R10,
-    R11,
-    R12,
-    R13,
-    R14,
 }
 
 struct Asm<'a> {
@@ -180,34 +68,34 @@ impl<'a> Asm<'a> {
                 '#' | '\n' => {}
                 _ => match self.expect_opword()? {
                     OpWord::Label(lab) => {
-                        stmts.push(Stmt::Label(lab));
+                        stmts.push(Stmt::Expr(Expr::Label(lab)));
                     }
                     OpWord::Keyword(kw) => match kw.as_str() {
                         ".pos" => {
                             self.expect_space()?;
-                            stmts.push(Stmt::DotPos(self.expect_u64()?));
+                            stmts.push(Stmt::Expr(Expr::Pos(self.expect_u64()?)));
                         }
                         ".quad" => {
                             self.expect_space()?;
-                            stmts.push(Stmt::DotQuad(self.expect_u64()?));
+                            stmts.push(Stmt::Expr(Expr::Quad(self.expect_u64()?)));
                         }
                         ".align" => {
                             self.expect_space()?;
-                            stmts.push(Stmt::DotAlign(self.expect_u64()?));
+                            stmts.push(Stmt::Expr(Expr::Align(self.expect_u64()?)));
                         }
                         ".entry" => {
                             self.expect_space()?;
-                            stmts.push(Stmt::DotEntry(self.expect_location()?));
+                            stmts.push(Stmt::Expr(Expr::Entry(self.expect_location()?)));
                         }
                         _ => bail!("invalid key word {},{}:{}", self.ln, i, kw),
                     },
                     OpWord::Other(op) => match op.as_str() {
-                        "halt" => stmts.push(Stmt::Halt),
-                        "nop" => stmts.push(Stmt::Nop),
+                        "halt" => stmts.push(Stmt::Inst(Inst::Halt)),
+                        "nop" => stmts.push(Stmt::Inst(Inst::Nop)),
                         "rrmovq" => {
                             self.expect_space()?;
                             let (ra, rb) = self.expect_rr()?;
-                            stmts.push(Stmt::Rrmovq(ra, rb));
+                            stmts.push(Stmt::Inst(Inst::Rrmovq(ra, rb)));
                         }
                         "irmovq" => {
                             self.expect_space()?;
@@ -216,7 +104,7 @@ impl<'a> Asm<'a> {
                             self.expect_char(',')?;
                             self.opt_space();
                             let ra = self.expect_reg()?;
-                            stmts.push(Stmt::Irmovq(loc, ra));
+                            stmts.push(Stmt::Inst(Inst::Irmovq(loc, ra)));
                         }
                         "rmmovq" => {
                             self.expect_space()?;
@@ -225,7 +113,7 @@ impl<'a> Asm<'a> {
                             self.expect_char(',')?;
                             self.opt_space();
                             let mem = self.expect_mem()?;
-                            stmts.push(Stmt::Rmmovq(ra, mem));
+                            stmts.push(Stmt::Inst(Inst::Rmmovq(ra, mem)));
                         }
                         "mrmovq" => {
                             self.expect_space()?;
@@ -234,101 +122,101 @@ impl<'a> Asm<'a> {
                             self.expect_char(',')?;
                             self.opt_space();
                             let ra = self.expect_reg()?;
-                            stmts.push(Stmt::Mrmovq(mem, ra));
+                            stmts.push(Stmt::Inst(Inst::Mrmovq(mem, ra)));
                         }
                         "addq" => {
                             self.expect_space()?;
                             let (ra, rb) = self.expect_rr()?;
-                            stmts.push(Stmt::Addq(ra, rb));
+                            stmts.push(Stmt::Inst(Inst::Addq(ra, rb)));
                         }
                         "subq" => {
                             self.expect_space()?;
                             let (ra, rb) = self.expect_rr()?;
-                            stmts.push(Stmt::Subq(ra, rb));
+                            stmts.push(Stmt::Inst(Inst::Subq(ra, rb)));
                         }
                         "andq" => {
                             self.expect_space()?;
                             let (ra, rb) = self.expect_rr()?;
-                            stmts.push(Stmt::Andq(ra, rb));
+                            stmts.push(Stmt::Inst(Inst::Andq(ra, rb)));
                         }
                         "xorq" => {
                             self.expect_space()?;
                             let (ra, rb) = self.expect_rr()?;
-                            stmts.push(Stmt::Xorq(ra, rb));
+                            stmts.push(Stmt::Inst(Inst::Xorq(ra, rb)));
                         }
                         "jmp" => {
                             self.expect_space()?;
-                            stmts.push(Stmt::Jmp(self.expect_location()?));
+                            stmts.push(Stmt::Inst(Inst::Jmp(self.expect_location()?)));
                         }
                         "jle" => {
                             self.expect_space()?;
-                            stmts.push(Stmt::Jle(self.expect_location()?));
+                            stmts.push(Stmt::Inst(Inst::Jle(self.expect_location()?)));
                         }
                         "jl" => {
                             self.expect_space()?;
-                            stmts.push(Stmt::Jl(self.expect_location()?));
+                            stmts.push(Stmt::Inst(Inst::Jl(self.expect_location()?)));
                         }
                         "je" => {
                             self.expect_space()?;
-                            stmts.push(Stmt::Je(self.expect_location()?));
+                            stmts.push(Stmt::Inst(Inst::Je(self.expect_location()?)));
                         }
                         "jne" => {
                             self.expect_space()?;
-                            stmts.push(Stmt::Jne(self.expect_location()?));
+                            stmts.push(Stmt::Inst(Inst::Jne(self.expect_location()?)));
                         }
                         "jge" => {
                             self.expect_space()?;
-                            stmts.push(Stmt::Jge(self.expect_location()?));
+                            stmts.push(Stmt::Inst(Inst::Jge(self.expect_location()?)));
                         }
                         "jg" => {
                             self.expect_space()?;
-                            stmts.push(Stmt::Jg(self.expect_location()?));
+                            stmts.push(Stmt::Inst(Inst::Jg(self.expect_location()?)));
                         }
                         "cmovle" => {
                             self.expect_space()?;
                             let (ra, rb) = self.expect_rr()?;
-                            stmts.push(Stmt::Cmovle(ra, rb));
+                            stmts.push(Stmt::Inst(Inst::Cmovle(ra, rb)));
                         }
                         "cmovl" => {
                             self.expect_space()?;
                             let (ra, rb) = self.expect_rr()?;
-                            stmts.push(Stmt::Cmovl(ra, rb));
+                            stmts.push(Stmt::Inst(Inst::Cmovl(ra, rb)));
                         }
                         "cmove" => {
                             self.expect_space()?;
                             let (ra, rb) = self.expect_rr()?;
-                            stmts.push(Stmt::Cmove(ra, rb));
+                            stmts.push(Stmt::Inst(Inst::Cmove(ra, rb)));
                         }
                         "cmovne" => {
                             self.expect_space()?;
                             let (ra, rb) = self.expect_rr()?;
-                            stmts.push(Stmt::Cmovne(ra, rb));
+                            stmts.push(Stmt::Inst(Inst::Cmovne(ra, rb)));
                         }
                         "cmovge" => {
                             self.expect_space()?;
                             let (ra, rb) = self.expect_rr()?;
-                            stmts.push(Stmt::Cmovge(ra, rb));
+                            stmts.push(Stmt::Inst(Inst::Cmovge(ra, rb)));
                         }
                         "cmovg" => {
                             self.expect_space()?;
                             let (ra, rb) = self.expect_rr()?;
-                            stmts.push(Stmt::Cmovg(ra, rb));
+                            stmts.push(Stmt::Inst(Inst::Cmovg(ra, rb)));
                         }
                         "call" => {
                             self.expect_space()?;
                             let loc = self.expect_location()?;
-                            stmts.push(Stmt::Call(loc));
+                            stmts.push(Stmt::Inst(Inst::Call(loc)));
                         }
                         "ret" => {
-                            stmts.push(Stmt::Ret);
+                            stmts.push(Stmt::Inst(Inst::Ret));
                         }
                         "pushq" => {
                             self.expect_space()?;
-                            stmts.push(Stmt::Pushq(self.expect_reg()?));
+                            stmts.push(Stmt::Inst(Inst::Pushq(self.expect_reg()?)));
                         }
                         "popq" => {
                             self.expect_space()?;
-                            stmts.push(Stmt::Popq(self.expect_reg()?));
+                            stmts.push(Stmt::Inst(Inst::Popq(self.expect_reg()?)));
                         }
                         _ => bail!("invalid opword found {},{}:{}", self.ln, i, op.as_str()),
                     },
@@ -811,219 +699,228 @@ impl<'a> Codegen<'a> {
         let mut pending = Vec::new();
         let mut entry = None;
 
-        use Stmt::*;
         for (ln, stmt) in self.stmts.iter().enumerate() {
             match stmt {
-                Label(label) => {
-                    if label_map.contains_key(label) {
-                        bail!("duplicated label {}:{}", ln, label);
+                Stmt::Expr(expr) => {
+                    use Expr::*;
+                    match expr {
+                        Label(label) => {
+                            if label_map.contains_key(label) {
+                                bail!("duplicated label {}:{}", ln, label);
+                            }
+                            label_map.insert(label, self.pos());
+                        }
+                        Align(align) => {
+                            self.align(*align);
+                        }
+                        Pos(pos) => {
+                            if self.segment().addr != *pos {
+                                self.segments.push(Segment::new_at(*pos));
+                            }
+                        }
+                        Entry(ent) => {
+                            entry = Some(ent);
+                        }
+                        Quad(data) => {
+                            self.push_u64(*data << 8 | 0xFF);
+                        }
                     }
-                    label_map.insert(label, self.pos());
                 }
-                DotAlign(align) => {
-                    self.align(*align);
-                }
-                DotPos(pos) => {
-                    if self.segment().addr != *pos {
-                        self.segments.push(Segment::new_at(*pos));
+                Stmt::Inst(inst) => {
+                    use Inst::*;
+                    match inst {
+                        Halt => self.push_byte(0x00),
+                        Nop => self.push_byte(0x10),
+                        Rrmovq(ra, rb) => {
+                            self.push_slice(&[0x20, self.compile_rr(ra, rb)]);
+                        }
+                        Irmovq(loc, rb) => {
+                            let c_reg_byte = 0xF0 | self.compile_reg(rb);
+                            self.push_slice(&[0x30, c_reg_byte]);
+                            let instant_val = match loc {
+                                Location::Label(label) => {
+                                    if label_map.contains_key(label) {
+                                        *label_map.get(label).unwrap()
+                                    } else {
+                                        pending.push((self.segment_id(), self.pos(), label));
+                                        0
+                                    }
+                                }
+                                Location::Abs(abs_val) => *abs_val,
+                            };
+                            self.push_u64(instant_val);
+                        }
+                        Rmmovq(ra, ma) => {
+                            let c_offset: [u8; 8] = ma.offset.to_le_bytes();
+                            self.push_slice(&[0x40, self.compile_rr(ra, &ma.reg)]);
+                            self.push_slice(&c_offset);
+                        }
+                        Mrmovq(ma, ra) => {
+                            self.push_slice(&[0x50, self.compile_rr(ra, &ma.reg)]);
+                            self.push_i64(ma.offset);
+                        }
+                        Addq(ra, rb) => {
+                            self.push_slice(&[0x60, self.compile_rr(ra, rb)]);
+                        }
+                        Subq(ra, rb) => {
+                            self.push_slice(&[0x61, self.compile_rr(ra, rb)]);
+                        }
+                        Andq(ra, rb) => {
+                            self.push_slice(&[0x62, self.compile_rr(ra, rb)]);
+                        }
+                        Xorq(ra, rb) => {
+                            self.push_slice(&[0x63, self.compile_rr(ra, rb)]);
+                        }
+                        Jmp(loc) => {
+                            self.push_byte(0x70);
+                            let address = match loc {
+                                Location::Abs(abs_addr) => *abs_addr,
+                                Location::Label(label) => {
+                                    if label_map.contains_key(label) {
+                                        *label_map.get(label).unwrap()
+                                    } else {
+                                        pending.push((self.segment_id(), self.pos(), label));
+                                        0
+                                    }
+                                }
+                            };
+                            self.push_u64(address);
+                        }
+                        Jle(loc) => {
+                            self.push_byte(0x71);
+                            let address = match loc {
+                                Location::Abs(abs_addr) => *abs_addr,
+                                Location::Label(label) => {
+                                    if label_map.contains_key(label) {
+                                        *label_map.get(label).unwrap()
+                                    } else {
+                                        pending.push((self.segment_id(), self.pos(), label));
+                                        0
+                                    }
+                                }
+                            };
+                            self.push_u64(address);
+                        }
+                        Jl(loc) => {
+                            self.push_byte(0x72);
+                            let address = match loc {
+                                Location::Abs(abs_addr) => *abs_addr,
+                                Location::Label(label) => {
+                                    if label_map.contains_key(label) {
+                                        *label_map.get(label).unwrap()
+                                    } else {
+                                        pending.push((self.segment_id(), self.pos(), label));
+                                        0
+                                    }
+                                }
+                            };
+                            self.push_u64(address);
+                        }
+                        Je(loc) => {
+                            self.push_byte(0x73);
+                            let address = match loc {
+                                Location::Abs(abs_addr) => *abs_addr,
+                                Location::Label(label) => {
+                                    if label_map.contains_key(label) {
+                                        *label_map.get(label).unwrap()
+                                    } else {
+                                        pending.push((self.segment_id(), self.pos(), label));
+                                        0
+                                    }
+                                }
+                            };
+                            self.push_u64(address);
+                        }
+                        Jne(loc) => {
+                            self.push_byte(0x74);
+                            let address = match loc {
+                                Location::Abs(abs_addr) => *abs_addr,
+                                Location::Label(label) => {
+                                    if label_map.contains_key(label) {
+                                        *label_map.get(label).unwrap()
+                                    } else {
+                                        pending.push((self.segment_id(), self.pos(), label));
+                                        0
+                                    }
+                                }
+                            };
+                            self.push_u64(address);
+                        }
+                        Jge(loc) => {
+                            self.push_byte(0x75);
+                            let address = match loc {
+                                Location::Abs(abs_addr) => *abs_addr,
+                                Location::Label(label) => {
+                                    if label_map.contains_key(label) {
+                                        *label_map.get(label).unwrap()
+                                    } else {
+                                        pending.push((self.segment_id(), self.pos(), label));
+                                        0
+                                    }
+                                }
+                            };
+                            self.push_u64(address);
+                        }
+                        Jg(loc) => {
+                            self.push_byte(0x76);
+                            let address = match loc {
+                                Location::Abs(abs_addr) => *abs_addr,
+                                Location::Label(label) => {
+                                    if label_map.contains_key(label) {
+                                        *label_map.get(label).unwrap()
+                                    } else {
+                                        pending.push((self.segment_id(), self.pos(), label));
+                                        0
+                                    }
+                                }
+                            };
+                            self.push_u64(address);
+                        }
+                        Cmovle(ra, rb) => {
+                            self.push_slice(&[0x21, self.compile_rr(ra, rb)]);
+                        }
+                        Cmovl(ra, rb) => {
+                            self.push_slice(&[0x22, self.compile_rr(ra, rb)]);
+                        }
+                        Cmove(ra, rb) => {
+                            self.push_slice(&[0x23, self.compile_rr(ra, rb)]);
+                        }
+                        Cmovne(ra, rb) => {
+                            self.push_slice(&[0x24, self.compile_rr(ra, rb)]);
+                        }
+                        Cmovge(ra, rb) => {
+                            self.push_slice(&[0x25, self.compile_rr(ra, rb)]);
+                        }
+                        Cmovg(ra, rb) => {
+                            self.push_slice(&[0x26, self.compile_rr(ra, rb)]);
+                        }
+                        Call(loc) => {
+                            self.push_byte(0x80);
+                            let address = match loc {
+                                Location::Abs(abs_addr) => *abs_addr,
+                                Location::Label(label) => {
+                                    if label_map.contains_key(label) {
+                                        *label_map.get(label).unwrap()
+                                    } else {
+                                        pending.push((self.segment_id(), self.pos(), label));
+                                        0
+                                    }
+                                }
+                            };
+                            self.push_u64(address);
+                        }
+                        Ret => {
+                            self.push_byte(0x90);
+                        }
+                        Pushq(reg) => {
+                            let c_reg = self.compile_reg(reg) << 4 | 0x0F;
+                            self.push_slice(&[0xA0, c_reg]);
+                        }
+                        Popq(reg) => {
+                            let c_reg = self.compile_reg(reg) << 4 | 0x0F;
+                            self.push_slice(&[0xB0, c_reg]);
+                        }
                     }
-                }
-                DotEntry(ent) => {
-                    entry = Some(ent);
-                }
-                DotQuad(data) => {
-                    self.push_u64(*data << 8 | 0xFF);
-                }
-                Halt => self.push_byte(0x00),
-                Nop => self.push_byte(0x10),
-                Rrmovq(ra, rb) => {
-                    self.push_slice(&[0x20, self.compile_rr(ra, rb)]);
-                }
-                Irmovq(loc, rb) => {
-                    let c_reg_byte = 0xF0 | self.compile_reg(rb);
-                    self.push_slice(&[0x30, c_reg_byte]);
-                    let instant_val = match loc {
-                        Location::Label(label) => {
-                            if label_map.contains_key(label) {
-                                *label_map.get(label).unwrap()
-                            } else {
-                                pending.push((self.segment_id(), self.pos(), label));
-                                0
-                            }
-                        }
-                        Location::Abs(abs_val) => *abs_val,
-                    };
-                    self.push_u64(instant_val);
-                }
-                Rmmovq(ra, ma) => {
-                    let c_offset: [u8; 8] = ma.offset.to_le_bytes();
-                    self.push_slice(&[0x40, self.compile_rr(ra, &ma.reg)]);
-                    self.push_slice(&c_offset);
-                }
-                Mrmovq(ma, ra) => {
-                    self.push_slice(&[0x50, self.compile_rr(ra, &ma.reg)]);
-                    self.push_i64(ma.offset);
-                }
-                Addq(ra, rb) => {
-                    self.push_slice(&[0x60, self.compile_rr(ra, rb)]);
-                }
-                Subq(ra, rb) => {
-                    self.push_slice(&[0x61, self.compile_rr(ra, rb)]);
-                }
-                Andq(ra, rb) => {
-                    self.push_slice(&[0x62, self.compile_rr(ra, rb)]);
-                }
-                Xorq(ra, rb) => {
-                    self.push_slice(&[0x63, self.compile_rr(ra, rb)]);
-                }
-                Jmp(loc) => {
-                    self.push_byte(0x70);
-                    let address = match loc {
-                        Location::Abs(abs_addr) => *abs_addr,
-                        Location::Label(label) => {
-                            if label_map.contains_key(label) {
-                                *label_map.get(label).unwrap()
-                            } else {
-                                pending.push((self.segment_id(), self.pos(), label));
-                                0
-                            }
-                        }
-                    };
-                    self.push_u64(address);
-                }
-                Jle(loc) => {
-                    self.push_byte(0x71);
-                    let address = match loc {
-                        Location::Abs(abs_addr) => *abs_addr,
-                        Location::Label(label) => {
-                            if label_map.contains_key(label) {
-                                *label_map.get(label).unwrap()
-                            } else {
-                                pending.push((self.segment_id(), self.pos(), label));
-                                0
-                            }
-                        }
-                    };
-                    self.push_u64(address);
-                }
-                Jl(loc) => {
-                    self.push_byte(0x72);
-                    let address = match loc {
-                        Location::Abs(abs_addr) => *abs_addr,
-                        Location::Label(label) => {
-                            if label_map.contains_key(label) {
-                                *label_map.get(label).unwrap()
-                            } else {
-                                pending.push((self.segment_id(), self.pos(), label));
-                                0
-                            }
-                        }
-                    };
-                    self.push_u64(address);
-                }
-                Je(loc) => {
-                    self.push_byte(0x73);
-                    let address = match loc {
-                        Location::Abs(abs_addr) => *abs_addr,
-                        Location::Label(label) => {
-                            if label_map.contains_key(label) {
-                                *label_map.get(label).unwrap()
-                            } else {
-                                pending.push((self.segment_id(), self.pos(), label));
-                                0
-                            }
-                        }
-                    };
-                    self.push_u64(address);
-                }
-                Jne(loc) => {
-                    self.push_byte(0x74);
-                    let address = match loc {
-                        Location::Abs(abs_addr) => *abs_addr,
-                        Location::Label(label) => {
-                            if label_map.contains_key(label) {
-                                *label_map.get(label).unwrap()
-                            } else {
-                                pending.push((self.segment_id(), self.pos(), label));
-                                0
-                            }
-                        }
-                    };
-                    self.push_u64(address);
-                }
-                Jge(loc) => {
-                    self.push_byte(0x75);
-                    let address = match loc {
-                        Location::Abs(abs_addr) => *abs_addr,
-                        Location::Label(label) => {
-                            if label_map.contains_key(label) {
-                                *label_map.get(label).unwrap()
-                            } else {
-                                pending.push((self.segment_id(), self.pos(), label));
-                                0
-                            }
-                        }
-                    };
-                    self.push_u64(address);
-                }
-                Jg(loc) => {
-                    self.push_byte(0x76);
-                    let address = match loc {
-                        Location::Abs(abs_addr) => *abs_addr,
-                        Location::Label(label) => {
-                            if label_map.contains_key(label) {
-                                *label_map.get(label).unwrap()
-                            } else {
-                                pending.push((self.segment_id(), self.pos(), label));
-                                0
-                            }
-                        }
-                    };
-                    self.push_u64(address);
-                }
-                Cmovle(ra, rb) => {
-                    self.push_slice(&[0x21, self.compile_rr(ra, rb)]);
-                }
-                Cmovl(ra, rb) => {
-                    self.push_slice(&[0x22, self.compile_rr(ra, rb)]);
-                }
-                Cmove(ra, rb) => {
-                    self.push_slice(&[0x23, self.compile_rr(ra, rb)]);
-                }
-                Cmovne(ra, rb) => {
-                    self.push_slice(&[0x24, self.compile_rr(ra, rb)]);
-                }
-                Cmovge(ra, rb) => {
-                    self.push_slice(&[0x25, self.compile_rr(ra, rb)]);
-                }
-                Cmovg(ra, rb) => {
-                    self.push_slice(&[0x26, self.compile_rr(ra, rb)]);
-                }
-                Call(loc) => {
-                    self.push_byte(0x80);
-                    let address = match loc {
-                        Location::Abs(abs_addr) => *abs_addr,
-                        Location::Label(label) => {
-                            if label_map.contains_key(label) {
-                                *label_map.get(label).unwrap()
-                            } else {
-                                pending.push((self.segment_id(), self.pos(), label));
-                                0
-                            }
-                        }
-                    };
-                    self.push_u64(address);
-                }
-                Ret => {
-                    self.push_byte(0x90);
-                }
-                Pushq(reg) => {
-                    let c_reg = self.compile_reg(reg) << 4 | 0x0F;
-                    self.push_slice(&[0xA0, c_reg]);
-                }
-                Popq(reg) => {
-                    let c_reg = self.compile_reg(reg) << 4 | 0x0F;
-                    self.push_slice(&[0xB0, c_reg]);
                 }
             }
         }
@@ -1061,7 +958,7 @@ impl<'a> Codegen<'a> {
     }
 
     fn compile_reg(&self, reg: &Reg) -> u8 {
-        use Reg::*;
+        use y86_inst::Reg::*;
         match reg {
             Rax => 0,
             Rcx => 1,
@@ -1098,39 +995,39 @@ impl<'a> Disassembler<'a> {
     fn disassemble(&mut self) -> anyhow::Result<Vec<(u64, Stmt)>> {
         let mut cmd_vec = Vec::new();
         let entry = self.object.entry;
-        cmd_vec.push((0, Stmt::DotEntry(Location::Abs(entry))));
+        cmd_vec.push((0, Stmt::Expr(Expr::Entry(Location::Abs(entry)))));
         for segment in &self.object.segments {
             let mut addr = segment.addr;
-            cmd_vec.push((addr, Stmt::Label(self.gen_label())));
-            cmd_vec.push((addr, Stmt::DotPos(addr)));
+            cmd_vec.push((addr, Stmt::Expr(Expr::Label(self.gen_label()))));
+            cmd_vec.push((addr, Stmt::Expr(Expr::Pos(addr))));
 
             let mut bf = ByteBuf::new(&segment.binary);
             while let Some(bii) = bf.next_u8() {
                 let (stmt, len) = match bii {
-                    0x00 => (Stmt::Halt, 1),
-                    0x10 => (Stmt::Nop, 1),
+                    0x00 => (Stmt::Inst(Inst::Halt), 1),
+                    0x10 => (Stmt::Inst(Inst::Nop), 1),
                     0x20 => {
                         let (ra, rb) = self.decompile_rr(bf.expect_u8()?)?;
-                        (Stmt::Rrmovq(ra, rb), 2)
+                        (Stmt::Inst(Inst::Rrmovq(ra, rb)), 2)
                     }
                     0x30 => {
                         let f_rbi = bf.expect_u8()?;
                         let rbi = f_rbi & 0xF;
                         let rb = self.decompile_reg(rbi)?;
                         let iv = bf.expect_u64()?;
-                        (Stmt::Irmovq(Location::Abs(iv), rb), 10)
+                        (Stmt::Inst(Inst::Irmovq(Location::Abs(iv), rb)), 10)
                     }
                     0x40 => {
                         let (ra, rb) = self.decompile_rr(bf.expect_u8()?)?;
                         let iv = bf.expect_i64()?;
                         (
-                            Stmt::Rmmovq(
+                            Stmt::Inst(Inst::Rmmovq(
                                 ra,
                                 MemAccess {
                                     offset: iv,
                                     reg: rb,
                                 },
-                            ),
+                            )),
                             10,
                         )
                     }
@@ -1138,107 +1035,107 @@ impl<'a> Disassembler<'a> {
                         let (ra, rb) = self.decompile_rr(bf.expect_u8()?)?;
                         let iv = bf.expect_i64()?;
                         (
-                            Stmt::Mrmovq(
+                            Stmt::Inst(Inst::Mrmovq(
                                 MemAccess {
                                     offset: iv,
                                     reg: rb,
                                 },
                                 ra,
-                            ),
+                            )),
                             10,
                         )
                     }
                     0x60 => {
                         let (ra, rb) = self.decompile_rr(bf.expect_u8()?)?;
-                        (Stmt::Addq(ra, rb), 2)
+                        (Stmt::Inst(Inst::Addq(ra, rb)), 2)
                     }
                     0x61 => {
                         let (ra, rb) = self.decompile_rr(bf.expect_u8()?)?;
-                        (Stmt::Subq(ra, rb), 2)
+                        (Stmt::Inst(Inst::Subq(ra, rb)), 2)
                     }
                     0x62 => {
                         let (ra, rb) = self.decompile_rr(bf.expect_u8()?)?;
-                        (Stmt::Andq(ra, rb), 2)
+                        (Stmt::Inst(Inst::Andq(ra, rb)), 2)
                     }
                     0x63 => {
                         let (ra, rb) = self.decompile_rr(bf.expect_u8()?)?;
-                        (Stmt::Xorq(ra, rb), 2)
+                        (Stmt::Inst(Inst::Xorq(ra, rb)), 2)
                     }
                     0x70 => {
                         let jaddr = bf.expect_u64()?;
-                        (Stmt::Jmp(Location::Abs(jaddr)), 9)
+                        (Stmt::Inst(Inst::Jmp(Location::Abs(jaddr))), 9)
                     }
                     0x71 => {
                         let jaddr = bf.expect_u64()?;
-                        (Stmt::Jle(Location::Abs(jaddr)), 9)
+                        (Stmt::Inst(Inst::Jle(Location::Abs(jaddr))), 9)
                     }
                     0x72 => {
                         let jaddr = bf.expect_u64()?;
-                        (Stmt::Jl(Location::Abs(jaddr)), 9)
+                        (Stmt::Inst(Inst::Jl(Location::Abs(jaddr))), 9)
                     }
                     0x73 => {
                         let jaddr = bf.expect_u64()?;
-                        (Stmt::Je(Location::Abs(jaddr)), 9)
+                        (Stmt::Inst(Inst::Je(Location::Abs(jaddr))), 9)
                     }
                     0x74 => {
                         let jaddr = bf.expect_u64()?;
-                        (Stmt::Jne(Location::Abs(jaddr)), 9)
+                        (Stmt::Inst(Inst::Jne(Location::Abs(jaddr))), 9)
                     }
                     0x75 => {
                         let jaddr = bf.expect_u64()?;
-                        (Stmt::Jge(Location::Abs(jaddr)), 9)
+                        (Stmt::Inst(Inst::Jge(Location::Abs(jaddr))), 9)
                     }
                     0x76 => {
                         let jaddr = bf.expect_u64()?;
-                        (Stmt::Jg(Location::Abs(jaddr)), 9)
+                        (Stmt::Inst(Inst::Jg(Location::Abs(jaddr))), 9)
                     }
                     0x21 => {
                         let (ra, rb) = self.decompile_rr(bf.expect_u8()?)?;
-                        (Stmt::Cmovle(ra, rb), 2)
+                        (Stmt::Inst(Inst::Cmovle(ra, rb)), 2)
                     }
                     0x22 => {
                         let (ra, rb) = self.decompile_rr(bf.expect_u8()?)?;
-                        (Stmt::Cmovl(ra, rb), 2)
+                        (Stmt::Inst(Inst::Cmovl(ra, rb)), 2)
                     }
                     0x23 => {
                         let (ra, rb) = self.decompile_rr(bf.expect_u8()?)?;
-                        (Stmt::Cmove(ra, rb), 2)
+                        (Stmt::Inst(Inst::Cmove(ra, rb)), 2)
                     }
                     0x24 => {
                         let (ra, rb) = self.decompile_rr(bf.expect_u8()?)?;
-                        (Stmt::Cmovne(ra, rb), 2)
+                        (Stmt::Inst(Inst::Cmovne(ra, rb)), 2)
                     }
                     0x25 => {
                         let (ra, rb) = self.decompile_rr(bf.expect_u8()?)?;
-                        (Stmt::Cmovge(ra, rb), 2)
+                        (Stmt::Inst(Inst::Cmovge(ra, rb)), 2)
                     }
                     0x26 => {
                         let (ra, rb) = self.decompile_rr(bf.expect_u8()?)?;
-                        (Stmt::Cmovg(ra, rb), 2)
+                        (Stmt::Inst(Inst::Cmovg(ra, rb)), 2)
                     }
                     0x80 => {
                         let caddr = bf.expect_u64()?;
-                        (Stmt::Call(Location::Abs(caddr)), 9)
+                        (Stmt::Inst(Inst::Call(Location::Abs(caddr))), 9)
                     }
-                    0x90 => (Stmt::Ret, 1),
+                    0x90 => (Stmt::Inst(Inst::Ret), 1),
                     0xA0 => {
                         let rafi = bf.expect_u8()?;
                         let rai = (rafi >> 4) & 0xF;
                         let ra = self.decompile_reg(rai)?;
-                        (Stmt::Pushq(ra), 2)
+                        (Stmt::Inst(Inst::Pushq(ra)), 2)
                     }
                     0xB0 => {
                         let rafi = bf.expect_u8()?;
                         let rai = (rafi >> 4) & 0xF;
                         let ra = self.decompile_reg(rai)?;
-                        (Stmt::Popq(ra), 2)
+                        (Stmt::Inst(Inst::Popq(ra)), 2)
                     }
                     0xFF => {
                         let num_sl = bf.slice(7)?;
                         let mut num_vec = Vec::from(num_sl);
                         num_vec.push(0);
                         let num = u64::from_le_bytes(num_vec[..].try_into()?);
-                        (Stmt::DotQuad(num), 8)
+                        (Stmt::Expr(Expr::Quad(num)), 8)
                     }
                     other => {
                         bail!("invalid instruction indicator {}", other);
@@ -1299,6 +1196,9 @@ struct Cli {
 
     #[arg(short = 'd', long, default_value_t = false)]
     disassemble: bool,
+
+    #[arg(short = 'a', long, default_value_t = false)]
+    address: bool,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -1306,7 +1206,11 @@ fn main() -> anyhow::Result<()> {
     if cli.disassemble {
         let disassemabled = disassemble(&cli.in_file)?;
         for (ln, stmt) in disassemabled {
-            println!("0x{:x}: {}", ln, stmt);
+            if cli.address {
+                println!("0x{:x}: {}", ln, stmt);
+            } else {
+                println!("{}", stmt);
+            }
         }
     } else {
         let bin_object = assemble(&cli.in_file)?;
